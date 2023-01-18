@@ -1,0 +1,204 @@
+---
+title: "Performing tests & Assumptions"
+author: "Charles Alba"
+date: "2022-11-05"
+output: html_document
+---
+
+# Reading and Cleaning data
+
+```{r}
+### load library
+library(splm)
+library(Ecdat)
+library(data.table)
+library(sf)
+library(spdep)
+library(rgdal)
+#install.packages("naniar")
+library(naniar)
+library(stringr)
+library(dplyr)
+library(tidyr)
+library(bit64)
+library(stargazer)
+library(plm)
+library(sjPlot)
+data<-read.csv("data.csv")
+
+# converting columns to their correct format
+data$date<-(as.Date((as.character(data$date_range_start)), format='%Y-%m-%d'))
+
+data$county<-str_pad(as.character(data$county), 5, pad = "0")
+
+
+```
+
+
+# Calculating unhealthy food reliance 
+
+```{r}
+# calcularing convenience store reliance 
+data$cs<-data$convenient_store_count/((data$convenient_store_count)+(data$grocery_count))
+
+# calculating fast-food reliance 
+data$ff<-(data$fast_food_count / (data$fast_food_count+data$full_service_count))
+
+# calculating covid incidence rate. 
+data$cv<-((data$monthly_cases)/(data$Total_Population))
+
+# taking out only relevant data columns 
+data<-subset(data,select=-c(Total_Population,date_range_start,convenient_store_count,grocery_count,fast_food_count,full_service_count,monthly_cases,Total_Population,monthly_deaths,Geo_QName))
+data<-data.table(data)
+data[is.na(data)] = 0
+```
+
+# Testing for Normality
+
+```{r}
+
+# Part 1: Test for normality
+
+# plotting the histograms 
+
+hist(data$cs,prob=T,breaks=50,main="Histogram for convenience-store reliance")
+lines(density(data$cs),lwd = 2,col = "red",lty="longdash")
+
+hist(data$ff,prob=T,breaks=50,main="Histogram for fast-food reliance")
+lines(density(data$ff),lwd = 2,col = "red",lty="longdash")
+
+# converting them to logit transformed since the histograms do not seem normally distributed
+
+data[is.na(data)] = 0
+data$cs[data$cs==0]<-0.00001
+data$cs[data$cs==1]<-0.99999
+data$ff[data$ff==0]<-0.00001
+data$ff[data$ff==1]<-0.99999
+data$y_cs<-log(data$cs/(1-data$cs))
+data$y_ff<-log(data$ff/(1-data$ff))
+
+
+# plotting the logit transformed histogram plots 
+
+hist(data$y_cs,prob=T,breaks=50,main="Histogram for logit convenience-store reliance")
+lines(density(data$y_cs),lwd = 2,col = "red",lty="longdash")
+
+
+hist(data$y_ff,prob=T,breaks=120,main="Histogram for logit fast-food reliance")
+lines(density(data$y_ff),lwd = 2,col = "red",lty="longdash")
+```
+# Testing for spatial autocorrelation. 
+
+## Reading shapefile and calculating Moran's I for spatial auto-correlation 
+
+```{r}
+
+# part 1: reading the shapefiles. 
+shapefile <- rgdal::readOGR('tl_2021_us_county.shp')
+in_data<-unique(data$county)
+shapefile<-shapefile[(shapefile$GEOID %in% in_data),]
+nb <- poly2nb(shapefile, row.names = shapefile$GEOID, queen = FALSE)
+xy<-coordinates(shapefile)
+
+wd25 <-knn2nb(knearneigh(xy, longlat = TRUE))
+wb25<-nb2listw(wd25)
+
+# part 2: Test for spatial autocorrelation 
+
+## create function for Moran's I statistic for individual panels
+moran_i<-function(data,wb25,type_test){
+  date_list<-unique(data$date)
+  statistic<-c()
+  p_value<-c()
+  for (i in 1:length(date_list)){
+    #print(paste0("Calculating Moran's I for ", i))
+    current_date<-date_list[i]
+    current_data<-data[data$date==current_date,]
+    if (type_test=="cs") {
+      moran<-moran.test(current_data$y_cs,wb25,alternative="greater")
+    } else {
+      moran<-moran.test(current_data$y_ff,wb25,alternative="greater")
+    }
+    statistic<-append(statistic,moran$statistic)
+    p_value<-append(p_value,moran$p.value)
+  }
+  moran_i_data<-data.frame (statistic  = statistic,
+                            p_value= p_value)
+  return(moran_i_data)
+}
+
+
+# Plotting the scatterplot to illustrate the spatial autocorrelation amongst Convenience-store reliance
+moran_i_output<-moran_i(data,wb25,"cs")
+plot(moran_i_output$p_value,moran_i_output$statistic,xlim=c(0,max(moran_i_output$p_value)),xlab="p-value",ylab="Moran's I coefficient",main="Moran's I test for spatial auto-correlation\n for convenient store dependency",cex=0.7, pch = 15)
+abline(v=0.05, col="red")
+text(0.038, 0, "p-value = 0.05",srt=90,col="red")
+
+
+# Plotting the scatterplot to illustrate the spatial autocorrelation amongst Fast-food reliance
+moran_i_output<-moran_i(data,wb25,"ff")
+plot(moran_i_output$p_value,moran_i_output$statistic,xlim=c(0,max(moran_i_output$p_value)),xlab="p-value",ylab="Moran's I coefficient",main="Moran's I test for spatial auto-correlation\n for fast-food dependency",cex=0.7,  pch = 15)
+abline(v=0.05, col="red")
+text(0.038, 0, "p-value = 0.05",srt=90,col="red")
+```
+
+
+# Test for fixed vs random vs ols
+
+## Convenience store reliance test 
+
+```{r}
+
+# this function test for the F-test
+test_panel_f<-function(formula,title,d=data){
+  pooled<-plm(formula = formula, data = d, index = c("county","date"), model="pooling")
+  fixed<- plm(formula = formula, data = d, index = c("county","date"), model = "within",effect = "time")
+  random<-plm(formula = formula, data = d, index = c("county","date"), model = "random")
+  cat(title)
+  (pFtest(fixed, pooled))  # if p<0.05, fixed effect is a better choice 
+
+}
+
+
+# this function test for the hausman test
+test_panel_h<-function(formula,d=data){
+  fixed<- plm(formula = formula, data = d, index = c("county","date"), model = "within",effect = "time")
+  random<-plm(formula = formula, data = d, index = c("county","date"), model = "random")
+  (phtest(fixed,random)) # if p<0.05, fixed effect is a better choice 
+}
+
+# creating the formula and feeding the functoin 
+fm_w <- y_cs~ + cv + percent_black + percent_hispanic + percent_native + percent_asian+ percent_black:cv + percent_hispanic:cv + percent_asian:cv + percent_native:cv
+test_panel_f(fm_w,"convenience store reliance model")
+test_panel_h(fm_w)
+
+```
+
+
+
+
+
+## Fast-food reliance test 
+
+```{r}
+fm_w <- y_ff~ + cv + percent_black + percent_hispanic + percent_native + percent_asian+ percent_black:cv + percent_hispanic:cv + percent_asian:cv
+test_panel_f(fm_w,"fast food reliance model")
+test_panel_h(fm_w)
+```
+
+
+# Testing for multi-collinearity
+
+```{r}
+
+# Testing multicollinearity for convenience store reliance 
+
+car::vif(lm(y_cs~ + cv + percent_black + percent_hispanic + percent_native + percent_asian, data=data))
+
+
+# Testing multi-collinearity for fast-food reliance 
+
+car::vif(lm(y_ff~ + cv + percent_black + percent_hispanic + percent_native + percent_asian, data=data))
+
+```
+
