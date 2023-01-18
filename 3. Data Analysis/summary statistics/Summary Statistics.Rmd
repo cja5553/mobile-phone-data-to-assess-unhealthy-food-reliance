@@ -1,0 +1,140 @@
+# Reading the data
+
+```{r}
+library(reshape2)
+library(bit64)
+library(data.table)
+library(ggplot2)
+library(stringr)
+library(dplyr)
+library(gmodels)
+options(scipen = 999)
+
+# Reading and cleaning the data
+df<-read.csv("data.csv")
+df$date_range_start<-as.Date((as.character(df$date_range_start)), format='%Y-%m-%d')
+df$county<-str_pad(as.character(df$county), 5, pad = "0")
+df$cv<-(((df$monthly_cases)/(df$Total_Population)))
+```
+
+# Summary based on racial demographic
+
+```{r}
+# classifying the pre-dominant racial county of each county. 
+df<-merge(df,race_demo,by.x="county",by.y = "Geo_FIPS", all.x = T) 
+
+## this race_demo file contains the predominant race of each county
+race_demo<-read.csv("race_demo.csv")
+race_demo$Geo_FIPS<-str_pad(as.character(race_demo$Geo_FIPS), 5, pad = "0")
+
+# removing irrelevant columns
+df_summary_2<-subset(df,select=c(convenient_store_count, grocery_count,fast_food_count,full_service_count,county,Total_Population,cv,percent_black,percent_hispanic, percent_native,percent_asian,race))
+
+
+
+# to include the overall consumption across the United States, we duplicate the counties and consider the race 'overall'
+df_summary_overall<-df_summary_2
+df_summary_overall$race<-"overall"
+df_summary_2<-rbind(df_summary_2,df_summary_overall)
+
+# Counting the number of counties with each predominant race
+df_race_count<-subset(df_summary_2,select=c(county,race))
+df_race_count<-df_race_count %>% distinct()
+df_race_count %>% count(race)
+
+```
+
+
+```{r}
+# calculating our statistics of interest (convenience store reliance, fast food reliance, and consumption rates of convenience stores, fast food, gorcery store, and full service restaurants)
+df_summary_2$convenient_store_rate<-(df_summary_2$convenient_store_count/df_summary_2$Total_Population)*1000
+df_summary_2$grocery_store_rate<-(df_summary_2$grocery_count/df_summary_2$Total_Population)*1000
+df_summary_2$fast_food_rate<-(df_summary_2$fast_food_count/df_summary_2$Total_Population)*1000
+df_summary_2$full_service_rate<-(df_summary_2$full_service_count/df_summary_2$Total_Population)*1000
+df_summary_2$convenience_store_reliance<-df_summary_2$convenient_store_count/(df_summary_2$grocery_count+df_summary_2$convenient_store_count)
+df_summary_2$fast_food_reliance<-(df_summary_2$fast_food_count)/(df_summary_2$fast_food_count+df_summary_2$full_service_count)
+df_summary_filtered<-subset(df_summary_2,select=c(county,convenient_store_rate,grocery_store_rate,fast_food_rate,full_service_rate,convenience_store_reliance,fast_food_reliance,race,cv))
+
+data = melt(df_summary_filtered, id.vars = c("county", "race","cv"),
+                measure.vars = c("convenient_store_rate",'grocery_store_rate','fast_food_rate','full_service_rate','convenience_store_reliance','fast_food_reliance'))
+data<-data[complete.cases(data), ]
+```
+
+
+
+
+
+```{r}
+# This function gives us the quantiles of the COVID incidence rates. 
+get_quantiles<-function(d1){
+  d<-group_by(d1) %>%mutate(check = ntile(cv, 100))
+  d$covid <-ifelse(d$check >= 90, "High COVID incidence (90 percentile)", # classifying COVID into high, moderate and no/few incidence rates based on quantiles, to be used later for our interaction plots. 
+    ifelse(d$check > 5 & d$check < 90, "Moderate COVID cases",
+      ifelse(d$check > 0 & d$check <= 5, "No / few COVID cases", NA)))
+  d<-d[!(d$covid=="Moderate COVID cases"),]
+  if(sum(d$check >= 90) == 0){
+    d1<-group_by(d1) %>%mutate(check = ntile(cv, 100))
+    d1<-head(d1[order(d1$cv,decreasing = T),],2)
+    d1$covid<-"High COVID incidence (90 percentile)"
+    d<-rbind(d,d1)
+  }
+  else{
+  }
+  return(d)
+  #return(data)
+}
+
+# This function gives us the means and CI of each given list 
+get_mean_and_CI<-function(values){
+  mean<-mean(values, na.rm=T)
+  conf_int <- confint(lm(values ~ 1), level = 0.95)
+  return(c(mean,conf_int[1], conf_int[2]))
+}
+
+# This gives us the mean and CI for each type, where type can be high covid incidence rate, low covid incidence rates, or overall. 
+get_mean_and_CI_for_high_and_no_covid<-function(type,filtered_data){
+  temp<-filtered_data[filtered_data$covid==type,]
+  return(get_mean_and_CI(temp$value))
+}
+
+# Returning it in a dataframe 
+return_df_one<-function(mean_and_CI,measurement_type,race,category){
+  return(data.frame(measurement_type=measurement_type,race=race,category=category,mean=mean_and_CI[1],lower_CI=mean_and_CI[2],upper_CI=mean_and_CI[3]))
+}
+
+# Getting the data for each race and each store type
+return_df_all<-function(mean_and_CI_overall,no_covid_CI,high_covid_CI,race,measurement_type){
+  df1<-return_df_one(mean_and_CI_overall,measurement_type,race,"overall")
+  df2<-return_df_one(no_covid_CI,measurement_type,race,"no/few covid cases")
+  df3<-return_df_one(high_covid_CI,measurement_type,race,"high covid cases")
+  return(rbind(df1,df2,df3))
+}
+
+df<-data.frame()
+# parse out by food type
+for (i in 1:length(unique(data$variable))){
+  current_variable=(unique(data$variable))[i]
+  temp_data<-data[data$variable==current_variable,]
+# parse out by race
+  for (j in 1:length(unique(data$race))){
+    current_race<-(unique(temp_data$race))[j]
+    race_filtered_data<-temp_data[temp_data$race==current_race,]
+    mean_and_CI_overall<-get_mean_and_CI(race_filtered_data$value)
+    covid_filtered_data<-get_quantiles(race_filtered_data)
+    no_covid_CI<-get_mean_and_CI_for_high_and_no_covid("No / few COVID cases",covid_filtered_data)
+    high_covid_CI<-get_mean_and_CI_for_high_and_no_covid("High COVID incidence (90 percentile)",covid_filtered_data)
+    df_to_insert<-return_df_all(mean_and_CI_overall,no_covid_CI,high_covid_CI,current_race,current_variable)
+    df<-rbind(df,df_to_insert)
+    }
+}
+df
+```
+
+```{r}
+df <- df %>% 
+  mutate(combined = paste0(round(mean, 2), " (", round(lower_CI, 2), ", ", round(upper_CI, 2), ")"))
+df <- df %>% select(-mean, -lower_CI, -upper_CI)
+print(df)
+```
+
+
