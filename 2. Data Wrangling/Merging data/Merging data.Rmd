@@ -1,0 +1,116 @@
+---
+title: "Merging"
+output: html_document
+date: "2022-09-27"
+---
+
+# reading all the data sets and cleaning the data
+
+```{r}
+library(reshape2)
+library(bit64)
+library(data.table)
+library(ggplot2)
+library(stringr)
+library(dplyr)
+library(tidyr)
+
+# Reading the convenient store data set 
+convenient_store<-read.csv("convenient_store_aggregated_by_county.csv")
+## converting the county FIPS to character, including the 0 infront of counties with 4-digit FIPS (eg "1234" -> "01234")
+convenient_store$county<-str_pad(as.character(convenient_store$county), 5, pad = "0")
+## formating the months into its proper date form 
+convenient_store$date_range_start<-as.Date(paste0(as.character(convenient_store$date_range_start), '-01'), format='%Y-%m-%d')
+
+# Reading the grocery store dataset 
+grocery<-read.csv("grocery_aggregated_by_county.csv")
+## converting the county FIPS to character, including the 0 infront of counties with 4-digit FIPS (eg "1234" -> "01234")
+grocery$county<-str_pad(as.character(grocery$county), 5, pad = "0")
+## formating the months into its proper date form 
+grocery$date_range_start<-as.Date(paste0(as.character(grocery$date_range_start), '-01'), format='%Y-%m-%d')
+
+# reading the full service retaurant dataset
+full_service<-read.csv("full_service_restaurant_by_county.csv")
+full_service<-subset(full_service,select = -(X))
+## converting the county FIPS to character, including the 0 infront of counties with 4-digit FIPS (eg "1234" -> "01234")
+full_service$county<-str_pad(as.character(full_service$county), 5, pad = "0")
+## formating the months into its proper date form 
+full_service$date_range_start<-as.Date(paste0(as.character(full_service$date_range_start), '-01'), format='%Y-%m-%d')
+
+# Reading the fast food restaurant dataset
+fast_food<-read.csv("fast_food_by_county.csv")
+fast_food<-subset(fast_food,select = -(X))
+## converting the county FIPS to character, including the 0 infront of counties with 4-digit FIPS (eg "1234" -> "01234")
+fast_food$county<-str_pad(as.character(fast_food$county), 5, pad = "0")
+## formating the months into its proper date form 
+fast_food$date_range_start<-as.Date(paste0(as.character(fast_food$date_range_start), '-01'), format='%Y-%m-%d')
+
+# reading the covid dataset 
+covid<-read.csv("covid_data_clean.csv")
+## converting the county FIPS to character, including the 0 infront of counties with 4-digit FIPS (eg "1234" -> "01234")
+covid$fips<-str_pad(as.character(covid$fips), 5, pad = "0")
+## formating the months into its proper date form 
+covid$date<-as.Date(paste0(as.character(covid$date), '-01'), format='%Y-%m-%d')
+
+# Reading the racial demographic dataset. 
+race_data<-read.csv("race_data.csv")
+## converting the county FIPS to character, including the 0 infront of counties with 4-digit FIPS (eg "1234" -> "01234")
+covid$fips<-str_pad(as.character(covid$fips), 5, pad = "0")
+## formating the months into its proper date form 
+race_data$Geo_FIPS<-str_pad(as.character(race_data$Geo_FIPS), 5, pad = "0")
+
+```
+
+
+# merging part 1: Merging and combining all the dependent variables together. 
+
+
+
+
+
+```{r}
+
+# merging convenient store and grocery dataset. 
+convenient_store_and_grocery<-merge(convenient_store,grocery,by.x=c("county","date_range_start"),by.y=c("county","date_range_start"),all.x=T,all.y=T)
+convenient_store_and_grocery<-convenient_store_and_grocery %>% rename(grocery_count=month_count.y, convenient_store_count=month_count.x)
+convenient_store_and_grocery<-subset(convenient_store_and_grocery,select=-c(type.x,type.y))
+
+# merging the full service restaurant and fast food dataset. 
+full_service_n_fast_food<-merge(full_service,fast_food,by.x=c("county","date_range_start"),by.y=c("county","date_range_start"),all.x=T,all.y=T)
+full_service_n_fast_food<-full_service_n_fast_food %>% rename(full_service_count=month_count.y,fast_food_count=month_count.x)
+full_service_n_fast_food<-subset(full_service_n_fast_food,select=-c(type.x,type.y))
+
+# combining all the dependent variables together. 
+DV<-merge(convenient_store_and_grocery,full_service_n_fast_food,by.x=c("county","date_range_start"),by.y=c("county","date_range_start"),all.x=T,all.y=T)
+
+# performing some cleaning 
+DV$date_range_start<-as.character(DV$date_range_start)
+DV<- complete(DV, date_range_start, county)
+DV[is.na(DV)] <- 0
+DV$date_range_start<-as.character(DV$date_range_start)
+DV$date_range_start<-as.Date((as.character(DV$date_range_start)), format='%Y-%m-%d')
+```
+
+
+# merging part 2: including the independent variables together. 
+
+
+```{r}
+# subseting only the relevant covid data
+covid<-subset(covid,select=c(date,fips,monthly_cases,monthly_deaths))
+
+# merging the COVID data with the DV. 
+df<-merge(DV,covid,by.x=c("county","date_range_start"),by.y=c("fips","date"),all.x=T)
+# merging the race data with the DV
+df<-merge(df,race_data,by.x="county",by.y="Geo_FIPS",all.x=T)
+
+# performing some cleaning 
+df[is.na(df)] <- 0
+df<-df[df$Total_Population != 0, ]
+
+# saving the data. 
+write.csv(df,"data.csv",row.names = FALSE)
+```
+
+
+
