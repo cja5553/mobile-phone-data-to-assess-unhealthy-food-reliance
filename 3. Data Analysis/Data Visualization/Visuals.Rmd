@@ -1,0 +1,72 @@
+
+# Reading the data
+
+```{r}
+# reading the library 
+library(reshape2)
+library(bit64)
+library(data.table)
+library(ggplot2)
+library(stringr)
+library(dplyr)
+options(scipen = 999)
+
+# Reading the file. 
+df<-read.csv("data.csv")
+# converting the columns to its appropriate column type
+df$date_range_start<-as.Date((as.character(df$date_range_start)), format='%Y-%m-%d')
+df$county<-str_pad(as.character(df$county), 5, pad = "0")
+```
+
+
+# aggregating by total
+
+```{r}
+
+# Selecting only variables of interest
+df_america<-subset(df,select=c(date_range_start,convenient_store_count,grocery_count,fast_food_count,full_service_count,monthly_cases))
+# cleaning the data. 
+df_america[is.na(df_america)] <- 0
+df_america<-aggregate(.~date_range_start, data=df_america,sum)
+
+# Calcularing convenience store, fast food reliance and covid reliance. 
+
+df_america$convenient_grocery_percent<-(df_america$convenient_store_count)/((df_america$grocery_count)+(df_america$convenient_store_count))*100
+df_america$fast_food_restaurant_percent<-(df_america$fast_food_count)/((df_america$full_service_count)+(df_america$fast_food_count))*100
+df_america$covid_infection_rate<-(df_america$monthly_cases)/318175740
+df_america[is.na(df_america)] <- 0
+df_america<-subset(df_america, select= c(date_range_start,convenient_grocery_percent,fast_food_restaurant_percent,covid_infection_rate))
+df_america1<-data.frame(melt(df_america,id_vars="date_range_start",measure.vars = c("convenient_grocery_percent","fast_food_restaurant_percent","covid_infection_rate")))
+df_america1$variable<-as.character(df_america1$variable)
+
+# Changing the variable names. 
+df_america1$variable <- replace(df_america1$variable, df_america1$variable == "convenient_grocery_percent", "Convenience store reliance (%)")
+df_america1$variable <- replace(df_america1$variable, df_america1$variable == "fast_food_restaurant_percent", "Fast food reliance (%)")
+df_america1$variable <- replace(df_america1$variable, df_america1$variable == "covid_infection_rate",  "COVID incidence rates")
+
+# changing date from DD-MM-YYYY to MM-YYYY
+df_america1$year<- as.numeric(format(df_america1$date_range_start, format = "%Y"))
+df_america1$month<-as.numeric(format(df_america1$date_range_start, format = "%m"))
+```
+
+
+
+
+# plotting graphs
+
+## Plotting overall trend 
+```{r}
+
+
+# plotting the graph. 
+df_america_unhealthy<-df_america1[!df_america1$variable=="COVID incidence rates",]
+df_america_covid<-df_america1[df_america1$variable=="COVID incidence rates",]
+
+
+ggplot()+geom_line(aes(color=variable,x=date_range_start,y=value),data=df_america_unhealthy)+
+  geom_line(aes(color=variable,x=date_range_start,y=value*1000),linetype = "dashed",data=df_america_covid)+
+  ylab("% Unhealthy food reliance")+scale_x_date(date_breaks = "months", date_labels = "%Y-%m")+
+  scale_y_continuous(sec.axis = sec_axis(~ .*(1/1000), name ="COVID incidence rate"))+
+  scale_color_discrete(name = "")+
+  scale_x_date(date_labels="%b",date_breaks  ="2 month")+xlab("\n          2019                                   2020                                   2021                        2022\nDate")+ theme_bw()+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),legend.position = c(0.2, 0.25), legend.background = element_rect(fill = "white"))+scale_color_discrete(limits = c("Convenience store reliance (%)", "Fast food reliance (%)", "COVID incidence rates"),name = "")
+```
