@@ -20,12 +20,13 @@ df$cv<-(((df$monthly_cases)/(df$Total_Population)))
 # Summary based on racial demographic
 
 ```{r}
-# classifying the pre-dominant racial county of each county. 
-df<-merge(df,race_demo,by.x="county",by.y = "Geo_FIPS", all.x = T) 
-
 ## this race_demo file contains the predominant race of each county
 race_demo<-read.csv("race_demo.csv")
 race_demo$Geo_FIPS<-str_pad(as.character(race_demo$Geo_FIPS), 5, pad = "0")
+
+# classifying the pre-dominant racial county of each county. 
+df<-merge(df,race_demo,by.x="county",by.y = "Geo_FIPS", all.x = T) 
+
 
 # removing irrelevant columns
 df_summary_2<-subset(df,select=c(convenient_store_count, grocery_count,fast_food_count,full_service_count,county,Total_Population,cv,percent_black,percent_hispanic, percent_native,percent_asian,race))
