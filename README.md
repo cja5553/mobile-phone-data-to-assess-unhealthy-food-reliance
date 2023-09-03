@@ -1,4 +1,4 @@
-# Codes for paper titled "Using mobile-phone data to assess racial disparities in unhealthy food reliance during the COVID-19 pandemic"
+# Codes for paper titled "Using mobile-phone data to assess socio-economic disparities in convenience store and fast food reliance during COVID-19"
 
 Author: Charles Alba and Ruopeng An
 
