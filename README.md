@@ -25,6 +25,6 @@ SafeGraph's patterns dataset. They can be purchased or obtained for free with sp
 
 Available through the New York Times COVID-19 data set. It is openly available here: https://github.com/nytimes/covid-19-data 
 
-### Racial Demographics
+### Socio-economic Demographics
 
 Available through American Explorer's 2017-2021 American Community Survey Census dataset. It is openly available here: https://www.socialexplorer.com/tables/ACS2021_5yr 
