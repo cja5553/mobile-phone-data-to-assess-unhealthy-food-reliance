@@ -54,10 +54,16 @@ covid$date<-as.Date(paste0(as.character(covid$date), '-01'), format='%Y-%m-%d')
 
 # Reading the racial demographic dataset. 
 race_data<-read.csv("race_data.csv")
+
+
+# Reading the other demographic dataset. 
+census_2_data<-read.csv("census_data_2.csv")
 ## converting the county FIPS to character, including the 0 infront of counties with 4-digit FIPS (eg "1234" -> "01234")
 covid$fips<-str_pad(as.character(covid$fips), 5, pad = "0")
 ## formating the months into its proper date form 
 race_data$Geo_FIPS<-str_pad(as.character(race_data$Geo_FIPS), 5, pad = "0")
+census_2_data$Geo_FIPS<-str_pad(as.character(race_data$Geo_FIPS), 5, pad = "0")
+census_2_data = subset(census_2_data, select = -c(Geo_QName) )
 
 ```
 
@@ -103,14 +109,25 @@ covid<-subset(covid,select=c(date,fips,monthly_cases,monthly_deaths))
 df<-merge(DV,covid,by.x=c("county","date_range_start"),by.y=c("fips","date"),all.x=T)
 # merging the race data with the DV
 df<-merge(df,race_data,by.x="county",by.y="Geo_FIPS",all.x=T)
+df<-merge(df,census_2_data,by.x="county",by.y="Geo_FIPS",all.x=T)
+df
+```
 
+
+
+
+
+```{r}
 # performing some cleaning 
 df[is.na(df)] <- 0
 df<-df[df$Total_Population != 0, ]
+```
+
+
+```{r}
 
 # saving the data. 
 write.csv(df,"data.csv",row.names = FALSE)
 ```
-
 
 

@@ -6,8 +6,10 @@ library(bit64)
 library(data.table)
 library(ggplot2)
 library(stringr)
+library(tibble)
 library(dplyr)
 library(gmodels)
+library(tidyverse)
 options(scipen = 999)
 
 # Reading and cleaning the data
@@ -20,30 +22,64 @@ df$cv<-(((df$monthly_cases)/(df$Total_Population)))
 # Summary based on racial demographic
 
 ```{r}
-## this race_demo file contains the predominant race of each county
 race_demo<-read.csv("race_demo.csv")
+SES_demo<-read.csv("other_SES_demo.csv")
 race_demo$Geo_FIPS<-str_pad(as.character(race_demo$Geo_FIPS), 5, pad = "0")
-
-# classifying the pre-dominant racial county of each county. 
+SES_demo$Geo_FIPS<-str_pad(as.character(SES_demo$Geo_FIPS), 5, pad = "0")
 df<-merge(df,race_demo,by.x="county",by.y = "Geo_FIPS", all.x = T) 
-
+df<-merge(df,SES_demo,by.x="county",by.y="Geo_FIPS",all.x=T)
 
 # removing irrelevant columns
-df_summary_2<-subset(df,select=c(convenient_store_count, grocery_count,fast_food_count,full_service_count,county,Total_Population,cv,percent_black,percent_hispanic, percent_native,percent_asian,race))
+df_summary_2<-subset(df,select=c(convenient_store_count, grocery_count,fast_food_count,full_service_count,county,Total_Population,cv,percent_black,percent_hispanic, percent_native,percent_asian,race,income,age,density, education))
 
 
 
 # to include the overall consumption across the United States, we duplicate the counties and consider the race 'overall'
 df_summary_overall<-df_summary_2
 df_summary_overall$race<-"overall"
+df_summary_overall$income<-"overall"
+df_summary_overall$age<-"overall"
+df_summary_overall$density<-"overall"
+df_summary_overall$education<-"overall"
 df_summary_2<-rbind(df_summary_2,df_summary_overall)
 
-# Counting the number of counties with each predominant race
-df_race_count<-subset(df_summary_2,select=c(county,race))
-df_race_count<-df_race_count %>% distinct()
-df_race_count %>% count(race)
+# Counting the number of counties with each predominant SES
+df_count<-subset(df_summary_2,select=c(county,race,income,age,density, education))
+df_count<-df_count %>% distinct()
+df_count %>% count(race)
 
 ```
+```{r}
+# Counting the number of counties with each predominant income
+df_count<-subset(df_summary_2,select=c(county,income))
+df_count<-df_count %>% distinct()
+df_count %>% count(income)
+```
+
+
+```{r}
+# Counting the number of counties with each predominant age
+df_count<-subset(df_summary_2,select=c(county,age))
+df_count<-df_count %>% distinct()
+df_count %>% count(age)
+```
+
+
+```{r}
+# Counting the number of counties with each predominant density
+df_count<-subset(df_summary_2,select=c(county,density))
+df_count<-df_count %>% distinct()
+df_count %>% count(density)
+```
+
+
+```{r}
+# Counting the number of counties with each predominant education
+df_count<-subset(df_summary_2,select=c(county,education))
+df_count<-df_count %>% distinct()
+df_count %>% count(education)
+```
+
 
 
 ```{r}
@@ -54,9 +90,9 @@ df_summary_2$fast_food_rate<-(df_summary_2$fast_food_count/df_summary_2$Total_Po
 df_summary_2$full_service_rate<-(df_summary_2$full_service_count/df_summary_2$Total_Population)*1000
 df_summary_2$convenience_store_reliance<-df_summary_2$convenient_store_count/(df_summary_2$grocery_count+df_summary_2$convenient_store_count)
 df_summary_2$fast_food_reliance<-(df_summary_2$fast_food_count)/(df_summary_2$fast_food_count+df_summary_2$full_service_count)
-df_summary_filtered<-subset(df_summary_2,select=c(county,convenient_store_rate,grocery_store_rate,fast_food_rate,full_service_rate,convenience_store_reliance,fast_food_reliance,race,cv))
+df_summary_filtered<-subset(df_summary_2,select=c(county,convenient_store_rate,grocery_store_rate,fast_food_rate,full_service_rate,convenience_store_reliance,fast_food_reliance,race,cv,income,education,density,age))
 
-data = melt(df_summary_filtered, id.vars = c("county", "race","cv"),
+data = melt(df_summary_filtered, id.vars = c("county", "race","income","age","density","education","cv"),
                 measure.vars = c("convenient_store_rate",'grocery_store_rate','fast_food_rate','full_service_rate','convenience_store_reliance','fast_food_reliance'))
 data<-data[complete.cases(data), ]
 ```
@@ -70,8 +106,8 @@ data<-data[complete.cases(data), ]
 get_quantiles<-function(d1){
   d<-group_by(d1) %>%mutate(check = ntile(cv, 100))
   d$covid <-ifelse(d$check >= 90, "High COVID incidence (90 percentile)", # classifying COVID into high, moderate and no/few incidence rates based on quantiles, to be used later for our interaction plots. 
-    ifelse(d$check > 5 & d$check < 90, "Moderate COVID cases",
-      ifelse(d$check > 0 & d$check <= 5, "No / few COVID cases", NA)))
+    ifelse(d$check > 10 & d$check < 90, "Moderate COVID cases",
+      ifelse(d$check > 0 & d$check <= 10, "No / few COVID cases", NA)))
   d<-d[!(d$covid=="Moderate COVID cases"),]
   if(sum(d$check >= 90) == 0){
     d1<-group_by(d1) %>%mutate(check = ntile(cv, 100))
@@ -99,43 +135,145 @@ get_mean_and_CI_for_high_and_no_covid<-function(type,filtered_data){
 }
 
 # Returning it in a dataframe 
-return_df_one<-function(mean_and_CI,measurement_type,race,category){
-  return(data.frame(measurement_type=measurement_type,race=race,category=category,mean=mean_and_CI[1],lower_CI=mean_and_CI[2],upper_CI=mean_and_CI[3]))
+return_df_one<-function(mean_and_CI,measurement_type,SES,category){
+  return(data.frame(measurement_type=measurement_type,SES=SES,category=category,mean=mean_and_CI[1],lower_CI=mean_and_CI[2],upper_CI=mean_and_CI[3]))
 }
 
 # Getting the data for each race and each store type
-return_df_all<-function(mean_and_CI_overall,no_covid_CI,high_covid_CI,race,measurement_type){
-  df1<-return_df_one(mean_and_CI_overall,measurement_type,race,"overall")
-  df2<-return_df_one(no_covid_CI,measurement_type,race,"no/few covid cases")
-  df3<-return_df_one(high_covid_CI,measurement_type,race,"high covid cases")
+return_df_all<-function(mean_and_CI_overall,no_covid_CI,high_covid_CI,SES,measurement_type){
+  df1<-return_df_one(mean_and_CI_overall,measurement_type,SES,"overall")
+  df2<-return_df_one(no_covid_CI,measurement_type,SES ,"no/few covid cases")
+  df3<-return_df_one(high_covid_CI,measurement_type,SES,"high covid cases")
   return(rbind(df1,df2,df3))
 }
 
-df<-data.frame()
-# parse out by food type
-for (i in 1:length(unique(data$variable))){
-  current_variable=(unique(data$variable))[i]
-  temp_data<-data[data$variable==current_variable,]
-# parse out by race
-  for (j in 1:length(unique(data$race))){
-    current_race<-(unique(temp_data$race))[j]
-    race_filtered_data<-temp_data[temp_data$race==current_race,]
-    mean_and_CI_overall<-get_mean_and_CI(race_filtered_data$value)
-    covid_filtered_data<-get_quantiles(race_filtered_data)
-    no_covid_CI<-get_mean_and_CI_for_high_and_no_covid("No / few COVID cases",covid_filtered_data)
-    high_covid_CI<-get_mean_and_CI_for_high_and_no_covid("High COVID incidence (90 percentile)",covid_filtered_data)
-    df_to_insert<-return_df_all(mean_and_CI_overall,no_covid_CI,high_covid_CI,current_race,current_variable)
-    df<-rbind(df,df_to_insert)
-    }
-}
-df
+# df<-data.frame()
+# # parse out by food type
+# for (i in 1:length(unique(data$variable))){
+#   current_variable=(unique(data$variable))[i]
+#   temp_data<-data[data$variable==current_variable,]
+# # parse out by race
+#   for (j in 1:length(unique(data$race))){
+#     current_race<-(unique(temp_data$race))[j]
+#     race_filtered_data<-temp_data[temp_data$race==current_race,]
+#     mean_and_CI_overall<-get_mean_and_CI(race_filtered_data$value)
+#     covid_filtered_data<-get_quantiles(race_filtered_data)
+#     no_covid_CI<-get_mean_and_CI_for_high_and_no_covid("No / few COVID cases",covid_filtered_data)
+#     high_covid_CI<-get_mean_and_CI_for_high_and_no_covid("High COVID incidence (90 percentile)",covid_filtered_data)
+#     df_to_insert<-return_df_all(mean_and_CI_overall,no_covid_CI,high_covid_CI,current_race,current_variable)
+#     df<-rbind(df,df_to_insert)
+#     }
+# }
+# df
+
+
+# executing the above function to get the mean and CI for each store type based on each category
+get_summary_stat<-function(data,SES){
+  df<-data.frame()
+  # parse out by food type
+  for (i in 1:length(unique(data$variable))){
+    current_variable=(unique(data$variable))[i]
+    temp_data<-data[data$variable==current_variable,]
+  # parse out by race
+    for (j in 1:length(unique(data[[SES]]))){
+      current_SES<-(unique(temp_data[[SES]]))[j]
+      SES_filtered_data<-temp_data[temp_data[[SES]]==current_SES,]
+      mean_and_CI_overall<-get_mean_and_CI(SES_filtered_data$value)
+      covid_filtered_data<-get_quantiles(SES_filtered_data)
+      no_covid_CI<-get_mean_and_CI_for_high_and_no_covid("No / few COVID cases",covid_filtered_data)
+      high_covid_CI<-get_mean_and_CI_for_high_and_no_covid("High COVID incidence (90 percentile)",covid_filtered_data)
+      df_to_insert<-return_df_all(mean_and_CI_overall,no_covid_CI,high_covid_CI,current_SES,current_variable)
+      df<-rbind(df,df_to_insert)
+      }
+  }
+  
+  df <- df %>% mutate(combined = paste0(round(mean, 2), " (", round(lower_CI, 2), ", ", round(upper_CI, 2), ")"))
+  df <- df %>% select(-mean, -lower_CI, -upper_CI)
+  return(df)}
+
+
+# df <- df %>% 
+#   mutate(combined = paste0(round(mean, 2), " (", round(lower_CI, 2), ", ", round(upper_CI, 2), ")"))
+# df <- df %>% select(-mean, -lower_CI, -upper_CI)
+# print(df)
+
+
+type_levels=c("convenience_store_reliance","convenient_store_rate","grocery_store_rate","fast_food_reliance","fast_food_rate","full_service_rate")
+# for age
+df_race<-(get_summary_stat(data,"race"))
+# printing it nicely in our desired format 
+df_race<-df_race %>%
+  spread(key = category, value = combined) %>%
+  arrange(measurement_type, SES)
+
+df_race$SES<-factor(df_race$SES, levels = c("percent_white","percent_black","percent_hispanic","percent_asian","percent_native","overall"))
+df_race$measurement_type<-factor(df_race$measurement_type, levels=type_levels)
+df_race <- df_race %>% arrange(measurement_type, SES)
 ```
 
 ```{r}
-df <- df %>% 
-  mutate(combined = paste0(round(mean, 2), " (", round(lower_CI, 2), ", ", round(upper_CI, 2), ")"))
-df <- df %>% select(-mean, -lower_CI, -upper_CI)
-print(df)
+# for income 
+df_income<-(get_summary_stat(data,"income"))
+# printing it nicely in our desired format 
+df_income<-df_income %>%
+  spread(key = category, value = combined) %>%
+  arrange(measurement_type, SES)
+
+df_income$SES<-factor(df_income$SES, levels = c("income_less_than_30","income_30_to_60","income_60_to_100","income_100_or_more","overall"))
+df_income$measurement_type<-factor(df_income$measurement_type, levels=type_levels)
+df_income <- df_income %>% arrange(measurement_type, SES)
+
 ```
 
+
+```{r}
+# for age
+df_age<-(get_summary_stat(data,"age"))
+# printing it nicely in our desired format 
+df_age<-df_age %>%
+  spread(key = category, value = combined) %>%
+  arrange(measurement_type, SES)
+
+
+
+df_age$SES<-factor(df_age$SES, levels = c("years_less_than_35","years_55_or_older","overall"))
+df_age$measurement_type<-factor(df_age$measurement_type, levels=type_levels)
+df_age <- df_age %>% arrange(measurement_type, SES)
+```
+
+```{r}
+# for population density 
+df_density<-(get_summary_stat(data,"density"))
+# printing it nicely in our desired format 
+df_density<-df_density %>%
+  spread(key = category, value = combined) %>%
+  arrange(measurement_type, SES)
+
+
+df_density$SES<-factor(df_density$SES, levels = c("low","medium","high","overall"))
+df_density$measurement_type<-factor(df_density$measurement_type, levels=type_levels)
+df_density <- df_density %>% arrange(measurement_type, SES)
+
+```
+
+```{r}
+# for education
+df_education<-(get_summary_stat(data,"education"))
+# printing it nicely in our desired format 
+df_education<-df_education %>%
+  spread(key = category, value = combined) %>%
+  arrange(measurement_type, SES)
+
+
+df_education$SES<-factor(df_education$SES, levels = c('education_less_than_HS', 'education_high_school','education_bachelors',"education_advanced","overall"))
+df_education$measurement_type<-factor(df_education$measurement_type, levels=type_levels)
+df_education <- df_education %>% arrange(measurement_type, SES)
+```
+
+
+```{r}
+# combining them and saving them 
+df_sumary_stats<-rbind(df_race,df_income,df_density,df_age,df_education)
+write.csv(df_sumary_stats,"compiled_stats.csv",row.names=FALSE)
+```
 

@@ -29,6 +29,7 @@ library(sjPlot)
 library(ggplot2)
 library(boot)
 library(car)
+library(lmtest)
 
 
 # Reading dataset 
@@ -61,6 +62,10 @@ data$cv<-((data$monthly_cases)/(data$Total_Population))
 data<-subset(data,select=-c(Total_Population,date_range_start,convenient_store_count,grocery_count,fast_food_count,full_service_count,monthly_cases,Total_Population,monthly_deaths,Geo_QName))
 data<-data.table(data)
 
+# changing income to thousands
+data$Median_household_income<-data$Median_household_income/1000
+# changing population density to square km per 1000
+data$population_density<-(data$population_density*2.5899999999)/1000
 
 # ensuring that in the logit() function 0's and 1's are accepted
 data[is.na(data)] = 0
@@ -80,16 +85,17 @@ data<-data.frame(data)
 # This function performs our models. 
 fixed_model<-function(formula,d=data){
   fixed<- plm(formula = formula, data = d, index = c("county","date"), model = "within",effect = "time")
-  (summary(fixed)) 
+  #(summary(fixed))
+  (coeftest(fixed, vcov = vcovHC(fixed, type = "HC3"))) 
 }
 
 # This function generates fitted-values and can be used for our interaction plot 
 predictions<-function(formula,d){
   d<-group_by(d) %>%mutate(check = ntile(cv, 100))
   
-  d$covid <-ifelse(d$check >= 90, "High (>90th percentile)", # classifying COVID into high, moderate and no/few incidence rates based on quantiles, to be used later for our interaction plots. 
-    ifelse(d$check > 5 & d$check < 90, "Moderate COVID cases",
-      ifelse(d$check > 0 & d$check <= 5, "Low (<5th percentile)", NA)))
+  d$covid <-ifelse(d$check >= 90, "High (\u2265 90th percentile)", # classifying COVID into high, moderate and no/few incidence rates based on quantiles, to be used later for our interaction plots. 
+    ifelse(d$check > 10 & d$check < 90, "Moderate COVID cases",
+      ifelse(d$check > 0 & d$check <= 10, "Low (\u2264 10th percentile)", NA)))
   d$predicts<-predict(plm(formula = formula, data = d, index = c("county","date"), model = "within",effect = "time"))
   d<-d[!(d$covid=="Moderate COVID cases"),]
   return(d)
@@ -103,111 +109,315 @@ predictions<-function(formula,d){
 
 ```{r}
 # performing the analysis here. 
-fm_w <- logit(cs)~ cv + percent_black + percent_hispanic + percent_native + percent_asian + percent_black:cv + percent_hispanic:cv + percent_asian:cv + percent_native:cv
+fm_w <- logit(cs)~ cv + percent_black + percent_hispanic + percent_native + percent_asian+population_density+Median_household_income+Median_age+percent_some_college_education_or_more+ percent_black:cv + percent_hispanic:cv + percent_asian:cv + percent_native:cv+population_density:cv+Median_household_income:cv+Median_age:cv+percent_some_college_education_or_more:cv
 fixed_model(fm_w)
 ```
 
+```{r}
+data_conv<-predictions(fm_w,data)
+```
 
 
 ### Making Interaction plots based on our results above. 
 
-#### Interaction plots for African-Americans
 
 ```{r}
-data_conv<-predictions(fm_w,data)
-ggplot(data=data_conv, aes(x=percent_black*100, y=inv.logit(predicts)*100, group=covid))+geom_smooth(aes(color=covid), method="gam", level=0.95)+ylab("convenience-store reliance (%)")+xlab("% of African Americans")+ scale_color_discrete(name = "COVID incidence rate")+geom_point(aes(color=covid),alpha=0.01)+ theme_linedraw()+ylim(0,50)
+# 
+# # elongating the data to make it easier to plot the different races in the same plot with ggplot
+# elongate_data<-function(data_conv){
+#   data_long<-subset(data_conv,select=c(predicts,percent_asian,percent_native,percent_black,percent_hispanic,county,date,covid))
+#   data_long <- melt(data_long, id = c("predicts","date","county","covid"))
+#   data_long$variable <- gsub('percent_black', 'African american', data_long$variable)
+#   data_long$variable <- gsub('percent_asian', 'Asian american', data_long$variable)
+#   data_long$variable <- gsub('percent_native', 'Native american', data_long$variable)
+#   data_long$variable <- gsub('percent_hispanic', 'Hispanic', data_long$variable)
+#   colnames(data_long)[colnames(data_long) == "variable"] <- "Race" # Rename column
+#   data_long$covid<-factor(data_long$covid, levels=c("Low (<5th percentile)","High (>90th percentile)"))
+#   return(data_long)
+# }
+# 
+# data_long<-elongate_data(data_conv)
+# 
+# 
+# ggplot()+geom_point(data=data_long,aes(x=value*100, y=inv.logit(predicts)*100,shape=covid,color=Race),alpha=0.02,legend=FALSE)+
+#   geom_point(data=data_long, aes(x = value - 999999, y=inv.logit(predicts)*100  - 999999, shape=covid,colour = Race), alpha=1.0)+geom_smooth(data=data_long,aes(x=value*100, y=inv.logit(predicts)*100,color=Race,lty=covid), method="gam",level=0.95)+ylab("Convenience store reliance (%)")+xlab("% of race")+ scale_linetype_discrete(name ="COVID incidence rate")+scale_color_discrete(name="County-level race percentage")+ theme_linedraw()+ylim(0,55)+xlim(0,100)
+# 
+# ggplot(data=data_long, aes(x=value*100, y=inv.logit(predicts)*100, col=Race,lty=covid))+geom_smooth(aes(color=Race,lty=covid), method="gam",level=0.95)+ylab("Convenience store reliance (%)")+xlab("% of race")+ scale_linetype_discrete(name = "COVID incidence rate")+ theme_linedraw()+scale_linetype_manual(values=c("solid", "twodash"))+ggtitle("Figure 3a.\nThe effect of racial demographics and COVID-19\non convenience store reliance")
+
 ```
 
-#### Interaction plots for Asians. 
+
+
 
 ```{r}
-ggplot(data=data_conv, aes(x=percent_asian*100, y=inv.logit(predicts)*100, group=covid))+geom_smooth(aes(color=covid), method="gam",level=0.95)+ylab("convenience-store reliance (%)")+xlab("% of Asian Americans")+geom_point(aes(color=covid),alpha=0.02)+ scale_color_discrete(name = "COVID incidence rate")+ theme_linedraw()+ylim(0,50)
+# # elongating the data to make it easier to plot the different races in the same plot with ggplot
+# elongate_data_SES<-function(data_conv){
+#   data_conv$percent_some_college_education_or_more<-(data_conv$percent_some_college_education_or_more)*100
+#   data_long<-subset(data_conv,select=c(predicts,population_density,Median_household_income,Median_age,percent_some_college_education_or_more,county,date,covid))
+#   data_long <- melt(data_long, id = c("predicts","date","county","covid"))
+#   data_long$variable <- gsub('Median_household_income', 'Median household income (per $1000)', data_long$variable)
+#   data_long$variable <- gsub('Median_age', 'Median Age', data_long$variable)
+#   data_long$variable <- gsub('percent_some_college_education_or_more', '% College educated', data_long$variable)
+#   data_long$variable <- gsub('population_density', 'population density 1000 population / sq km)', data_long$variable)
+#   colnames(data_long)[colnames(data_long) == "variable"] <- "Variable" # Rename column
+#   data_long$covid<-factor(data_long$covid, levels=c("Low (<5th percentile)","High (>90th percentile)"))
+#   return(data_long)
+# }
+# 
+# data_long<-elongate_data_SES(data_conv)
+# 
+# ggplot(data=data_long, aes(x=value, y=inv.logit(predicts)*100, col=SES,lty=covid))+geom_smooth(aes(color=Variable,lty=covid), method="gam",level=0.95)+ylab("Convenience store reliance (%)")+xlab("socio-economic measure")+ scale_linetype_discrete(name = "COVID incidence rate")+ theme_linedraw()+scale_linetype_manual(values=c("solid", "twodash"))+ggtitle("Figure 3b.\nThe effect of other SES and COVID-19\non convenience store reliance")
+
 ```
 
-#### Interaction plots for Native Americans. 
 
 
-```{r}
-ggplot(data=data_conv, aes(x=percent_native*100, y=inv.logit(predicts)*100, group=covid))+geom_smooth(aes(color=covid), method="gam",level=0.95)+ylab("convenience-store reliance (%)")+xlab("% of Native Americans")+geom_point(aes(color=covid),alpha=0.02)+ scale_color_discrete(name = "COVID incidence rate")+ theme_linedraw()+ylim(0,50)
-```
-
-
-#### Combining graphs for aesthetic purposes. 
 
 ```{r}
 
-# elongating the data to make it easier to plot the different races in the same plot with ggplot
-elongate_data<-function(data_conv){
-  data_long<-subset(data_conv,select=c(predicts,percent_asian,percent_native,percent_black,percent_hispanic,county,date,covid))
+# This function elongates the data which makes it easier for us to plot our interaction plots
+elongate_data_SES<-function(data_conv){
+  # making a copy of the data
+  data_org<-data_conv
+  data_conv<-subset(data_conv,select=-c(predicts, date, covid))
+  # we want to ensure that we classify the data from all unique counties of which we have
+  # data_conv <- data_conv[!duplicated(data_conv), ]
+  data_conv$percent_some_college_education_or_more <- data_conv$percent_some_college_education_or_more * 100
+  data_conv$percent_black <- data_conv$percent_black * 100
+  data_conv$percent_hispanic <- data_conv$percent_hispanic * 100
+  data_conv$percent_native <- data_conv$percent_native * 100
+  data_conv$percent_asian <- data_conv$percent_asian * 100
+  data_conv$Median_household_income <- data_conv$Median_household_income * 1000
+    # Binning
+  breaks_percent <- seq(0, 100, by = 25) # Define breaks for percentages
+  labels_percent <- c("0-25%", "25-50%", "50-75%", "75-100%")
+  
+  breaks_income <- c(0,30000,60000,100000,1000000000)
+  labels_income <- c("< $30k", "$30k-60k", "$60k-100k", "\u2265 100k")
+
+  
+  breaks_density <- c(0,1,3,1000000)
+  labels_density <- c("small (< 1)","medium (1-3)", "large (\u2265 3)")
+
+  breaks_age <- c(0,35,45,55,100)
+  labels_age <- c("<35","35-44","45-54","\u2265 55")
+  
+  # Cut variables using respective breaks and labels
+  data_conv$percent_some_college_education_or_more_bin <- cut(data_conv$percent_some_college_education_or_more, breaks = breaks_percent, labels = labels_percent, include.lowest = TRUE, right = TRUE)
+    # Cut variables using respective breaks and labels
+  data_conv$percent_black_binned <- cut(data_conv$percent_black, breaks = breaks_percent, labels = labels_percent, include.lowest = TRUE, right = FALSE)
+    # Cut variables using respective breaks and labels
+  data_conv$percent_asian_binned <- cut(data_conv$percent_asian, breaks = breaks_percent, labels = labels_percent, include.lowest = TRUE, right = FALSE)
+    # Cut variables using respective breaks and labels
+  data_conv$percent_hispanic_binned <- cut(data_conv$percent_hispanic, breaks = breaks_percent, labels = labels_percent, include.lowest = TRUE, right = FALSE)
+    # Cut variables using respective breaks and labels
+  data_conv$percent_native_binned <- cut(data_conv$percent_native, breaks = breaks_percent, labels = labels_percent, include.lowest = TRUE, right = FALSE)
+  
+  data_conv$population_density_bin <- cut(data_conv$population_density, breaks = breaks_density, labels = labels_density, include.lowest = TRUE, right = FALSE)
+  data_conv$Median_age_bin <- cut(data_conv$Median_age, breaks = breaks_age, labels = labels_age, include.lowest = TRUE, right = TRUE)
+  data_conv$Median_household_income_bin <- cut(data_conv$Median_household_income, breaks = breaks_income, labels = labels_income, include.lowest = TRUE, right = FALSE)
+  data_conv$Median_age_bin <- factor(data_conv$Median_age_bin, levels = labels_age)
+  # merging the binned socio-economic data back with the original data
+  data_w_binned<-merge(data_org, data_conv, by.x="county", by.y="county", all.x=TRUE)
+  # only keeping high and low COVID-19 incidence rates. 
+  data_w_binned<-data_w_binned[!(data_w_binned$covid=="Moderate COVID cases"),]
+  
+  data_long <- subset(data_w_binned, select = c(predicts, population_density_bin, Median_household_income_bin, Median_age_bin, percent_some_college_education_or_more_bin,percent_black_binned,percent_asian_binned,percent_hispanic_binned,percent_native_binned, county, date, covid))
   data_long <- melt(data_long, id = c("predicts","date","county","covid"))
-  data_long$variable <- gsub('percent_black', 'African american', data_long$variable)
-  data_long$variable <- gsub('percent_asian', 'Asian american', data_long$variable)
-  data_long$variable <- gsub('percent_native', 'Native american', data_long$variable)
-  data_long$variable <- gsub('percent_hispanic', 'Hispanic', data_long$variable)
-  colnames(data_long)[colnames(data_long) == "variable"] <- "Race" # Rename column
-  data_long$covid<-factor(data_long$covid, levels=c("Low (<5th percentile)","High (>90th percentile)"))
+  
+  data_long$variable <- gsub('Median_household_income_bin', 'Median household income ($)', data_long$variable)
+  data_long$variable <- gsub('Median_age_bin', 'Median age', data_long$variable)
+  
+
+  data_long$variable <- gsub('percent_some_college_education_or_more_bin', '% College educated', data_long$variable)
+  data_long$variable <- gsub('population_density_bin', 'Population density (1000 population/sq km)', data_long$variable)
+  data_long$variable <- gsub('percent_black_binned', '% African American', data_long$variable)
+  data_long$variable <- gsub('percent_asian_binned', '% Asian American', data_long$variable)
+  data_long$variable <- gsub('percent_native_binned', '% Native American', data_long$variable)
+  data_long$variable <- gsub('percent_hispanic_binned', '% Hispanic', data_long$variable)
+  # Ordering the facets
+desired_order <- c('% African American', 'Median household income ($)','% Hispanic', 'Median age','% Asian American','% College educated', '% Native American',  'Population density (1000 population/sq km)')
+
+data_long$variable <- factor(data_long$variable, levels = desired_order)
+data_long$value <- factor(data_long$value, 
+                         levels = c(labels_income,labels_age,labels_percent,labels_density), ordered = TRUE)
+
   return(data_long)
+  
 }
 
-data_long<-elongate_data(data_conv)
+data_long <- elongate_data_SES(data_conv)
 
 
-ggplot()+geom_point(data=data_long,aes(x=value*100, y=inv.logit(predicts)*100,shape=covid,color=Race),alpha=0.02,legend=FALSE)+
-  geom_point(data=data_long, aes(x = value - 999999, y=inv.logit(predicts)*100  - 999999, shape=covid,colour = Race), alpha=1.0)+geom_smooth(data=data_long,aes(x=value*100, y=inv.logit(predicts)*100,color=Race,lty=covid), method="gam",level=0.95)+ylab("Convenience store reliance (%)")+xlab("% of race")+ scale_linetype_discrete(name ="COVID incidence rate")+scale_color_discrete(name="County-level race percentage")+ theme_linedraw()+ylim(0,55)+xlim(0,100)
 
-ggplot(data=data_long, aes(x=value*100, y=inv.logit(predicts)*100, col=Race,lty=covid))+geom_smooth(aes(color=Race,lty=covid), method="gam",level=0.95)+ylab("Convenience store reliance (%)")+xlab("% of race")+ scale_linetype_discrete(name = "COVID incidence rate")+ theme_linedraw()+scale_linetype_manual(values=c("solid", "twodash"))+ggtitle("Figure 2a.\nThe effect of racial demographics and COVID-19\non convenience store reliance")
+
+
+# Plotting the ggplot
+plot1 <- ggplot(data = data_long, aes(x = value, y = inv.logit(predicts) * 100, fill = covid)) +
+  geom_boxplot(aes(color = covid)) +
+  # geom_line(data = data_medians, aes(y = median_value, group = interaction(covid, Variable), color = covid), size = 1) +
+  facet_wrap(~ variable, scales = "free_x", ncol = 2) + 
+  ylab("Convenience store reliance (%)") +
+  xlab("socio-economic measure") +
+  theme_linedraw() +
+  labs(fill = "COVID-19 incidence rate", color = "COVID-19 incidence rate")+
+  theme(panel.grid.major = element_blank(),    # Remove major grid lines
+        panel.grid.minor = element_blank(),
+        text = element_text(size = 24),
+    axis.title = element_text(size = 24),
+    axis.text = element_text(size = 18),
+    plot.title = element_text(size = 24),
+    legend.text = element_text(size = 20)) +  ggtitle("Interaction effect between socio-economic measures and covid-19\n on convenience store reliance")
+
+plot1
+ggsave("Fig 4.jpg", plot = plot1, width = 16, height = 18, dpi = 300, type = "cairo")
+
 
 ```
 
+```{r}
+# Define dodge width
+dodge_width <- 0.75
+# Computing the medians
+data_medians <- data_long %>%
+  group_by(variable, value, covid) %>%
+  summarise(median_value = median(inv.logit(predicts) * 100, na.rm = TRUE), .groups = "drop")
+# Plot
+plot2 <- ggplot(data = data_long, aes(x = value, y = inv.logit(predicts) * 100, fill = covid)) +
+  geom_boxplot(aes(color = covid), position = position_dodge(width = dodge_width)) +
+  geom_point(data = data_medians, aes(y = median_value, color = covid), position = position_dodge(width = dodge_width)) +
+  geom_line(data = data_medians, aes(y = median_value, group = interaction(covid, variable), color = covid), 
+            position = position_dodge(width = dodge_width), size = 0.5, alpha = 0.75) +  
+  facet_wrap(~ variable, scales = "free_x", ncol = 2) + 
+  ylab("Convenience store reliance (%)") +
+  xlab("socio-economic measure") +
+  theme_linedraw() +
+  labs(fill = "COVID-19 incidence rate", color = "COVID-19 incidence rate")+
+  theme(panel.grid.major = element_blank(),    # Remove major grid lines
+        panel.grid.minor = element_blank(),
+        text = element_text(size = 23),
+    axis.title = element_text(size = 23),
+    axis.text = element_text(size = 18),
+    plot.title = element_text(size = 23),
+    legend.text = element_text(size = 20),
+    strip.text = element_text(face = "bold"))  +  ggtitle("Interaction effect between socio-economic measures and covid-19 on convenience store reliance")
 
+plot2
+ggsave("Fig 3.jpg", plot = plot2, width = 16, height = 18, dpi = 300, type = "cairo")
+
+```
 
 
 ## Performing analysis for Fast-food reliance
 
 ```{r}
-fm_w <- logit(ff)~ cv + percent_black + percent_hispanic + percent_native + percent_asian + percent_black:cv + percent_hispanic:cv + percent_asian:cv + percent_native:cv
+fm_w <- logit(ff)~ cv + percent_black + percent_hispanic + percent_native + percent_asian+population_density+Median_household_income+Median_age+percent_some_college_education_or_more+ percent_black:cv + percent_hispanic:cv + percent_asian:cv + percent_native:cv+population_density:cv+Median_household_income:cv+Median_age:cv+percent_some_college_education_or_more:cv
 fixed_model(fm_w)
 data_fast_food<-predictions(fm_w,data)
 ```
 
+
+
+
 ### Making interaction plots based on the results above
 
-#### Interact plots for African-Americans 
-
 
 ```{r}
-ggplot(data=data_fast_food, aes(x=percent_black*100, y=inv.logit(predicts)*100, group=covid))+geom_smooth(aes(color=covid), method="gam",level=0.95)+ylab("convenience-store reliance (%)")+xlab("% of African Americans")+ scale_fill_discrete(name = "COVID incidence rate")+geom_point(aes(color=covid),alpha=0.02)+ scale_color_discrete(name = "COVID incidence rate")+ theme_linedraw()
-```
-
-
-#### Interact plots for Asian-Americans 
-
-```{r}
-ggplot(data=data_fast_food, aes(x=percent_asian*100, y=inv.logit(predicts)*100, group=covid))+geom_smooth( aes(color=covid), method="gam",level=0.95)+ylab("convenience-store reliance (%)")+xlab("% of Asian Americans")+geom_point(aes(color=covid),alpha=0.02)+ scale_color_discrete(name = "COVID incidence rate")+ theme_linedraw()
-```
-
-#### Interact plots for Native Americans. 
-
-```{r}
-ggplot(data=data_fast_food, aes(x=percent_native*100, y=inv.logit(predicts)*100, group=covid))+geom_smooth(aes(color=covid), method="gam")+ylab("convenience-store reliance (%)")+xlab("% of Native Americans")+ scale_color_discrete(name = "COVID incidence rate")+geom_point(aes(color=covid),alpha=0.02)+ theme_linedraw()
-```
-
-
-#### Combining Graphs for aesthetic purposes. 
-
-```{r}
-data_long<-elongate_data(data_fast_food)
-
-
-ggplot()+geom_point(data=data_long,aes(x=value*100, y=inv.logit(predicts)*100,shape=covid,color=Race),alpha=0.015,legend=FALSE)+
-  geom_point(data=data_long, aes(x = value - 999999, y=inv.logit(predicts)*100  - 999999, shape=covid,colour = Race), alpha=1.0)+geom_smooth(data=data_long,aes(x=value*100, y=inv.logit(predicts)*100,color=Race,lty=covid), method="gam",level=0.95)+ylab("fast-food reliance (%)")+xlab("% of Race")+ scale_linetype_discrete(name ="COVID incidence rate")+ theme_linedraw()+ylim(40,90)+xlim(0,100)
-
-ggplot(data=data_long, aes(x=value*100, y=inv.logit(predicts)*100, col=Race,lty=covid))+geom_smooth(aes(color=Race,lty=covid), method="gam",level=0.95)+ylab("Fast food reliance (%)")+xlab("% of race")+ scale_linetype_discrete(name = "COVID incidence rate")+ theme_linedraw()+scale_linetype_manual(values=c("solid", "twodash"))+ggtitle("Figure 2b.\nThe effect of racial demographics and COVID-19\non fast-food reliance")
+# data_long<-elongate_data(data_fast_food)
+# 
+# 
+# ggplot(data=data_long, aes(x=value*100, y=inv.logit(predicts)*100, col=Race,lty=covid))+geom_smooth(aes(color=Race,lty=covid), method="gam",level=0.95)+ylab("Fast food reliance (%)")+xlab("% of race")+ scale_linetype_discrete(name = "COVID incidence rate")+ theme_linedraw()+scale_linetype_manual(values=c("solid", "twodash"))+ggtitle("Figure 4a.\nThe effect of racial demographics and COVID-19\non fast-food reliance")
 
 ```
 
 
+```{r}
+# data_long<-elongate_data_SES(data_fast_food)
+# ggplot(data=data_long, aes(x=value, y=inv.logit(predicts)*100, col=Variable,lty=covid))+geom_smooth(aes(color=Variable,lty=covid), method="gam",level=0.95)+ylab("Convenience store reliance (%)")+xlab("Socio-economic measure")+ scale_linetype_discrete(name = "COVID incidence rate")+ theme_linedraw()+scale_linetype_manual(values=c("solid", "twodash"))+ggtitle("Figure 4b.\nThe effect of other SES and COVID-19\non fast-food reliance")
+```
 
 
 
+```{r}
+
+data_long <- elongate_data_SES(data_fast_food)
+
+
+
+# Plotting the ggplot
+plot1 <- ggplot(data = data_long, aes(x = value, y = inv.logit(predicts) * 100, fill = covid)) +
+  geom_boxplot(aes(color = covid)) +
+ scale_fill_manual(values = c("blue", "red"),
+                    guide = guide_legend(override.aes = list(fill = c("red", "blue")))) +
+  scale_color_manual(values = c("blue", "red"),
+                     guide = guide_legend(override.aes = list(color = c("red", "blue"))))+
+
+  # geom_line(data = data_medians, aes(y = median_value, group = interaction(covid, Variable), color = covid), size = 1) +
+  facet_wrap(~ variable, scales = "free_x", ncol = 2) + 
+  ylab("Convenience store reliance (%)") +
+  xlab("socio-economic measure") +
+  theme_linedraw() +
+  labs(fill = "COVID-19 incidence rate", color = "COVID-19 incidence rate")+
+  theme(panel.grid.major = element_blank(),    # Remove major grid lines
+        panel.grid.minor = element_blank(),
+        text = element_text(size = 23),
+    axis.title = element_text(size = 23),
+    axis.text = element_text(size = 18),
+    plot.title = element_text(size = 23),
+    legend.text = element_text(size = 20),
+    strip.text = element_text(face = "bold")) +  # Remove minor grid lines
+  
+  ggtitle("Interaction effect between socio-economic measures and covid-19 on fast food reliance")
+
+plot1
+ggsave("plot_fast_food.jpg", plot = plot1, width = 16, height = 18, dpi = 300, type = "cairo")
+
+
+```
+
+
+```{r}
+# Define dodge width
+dodge_width <- 0.75
+
+# Computing the medians
+data_medians <- data_long %>%
+  group_by(variable, value, covid) %>%
+  summarise(median_value = median(inv.logit(predicts) * 100, na.rm = TRUE), .groups = "drop")
+
+
+
+# Plot
+plot2 <- ggplot(data = data_long, aes(x = value, y = inv.logit(predicts) * 100, fill = covid)) +
+  geom_boxplot(aes(color = covid), position = position_dodge(width = dodge_width)) + 
+  geom_point(data = data_medians, aes(y = median_value, color = covid), position = position_dodge(width = dodge_width)) +
+  geom_line(data = data_medians, aes(y = median_value, group = interaction(covid, variable), color = covid), 
+            position = position_dodge(width = dodge_width), size = 0.5, alpha = 0.75) +  
+  facet_wrap(~ variable, scales = "free_x", ncol = 2) + 
+   scale_fill_manual(values = c("blue", "red"),
+                    guide = guide_legend(override.aes = list(fill = c("red", "blue")))) +
+  scale_color_manual(values = c("blue", "red"),
+                     guide = guide_legend(override.aes = list(color = c("red", "blue"))))+
+  ylab("Convenience store reliance (%)") +
+  xlab("socio-economic measure") +
+  theme_linedraw() +
+  labs(fill = "COVID-19 incidence rate", color = "COVID-19 incidence rate")+
+  theme(panel.grid.major = element_blank(),    # Remove major grid lines
+        panel.grid.minor = element_blank(),
+        text = element_text(size = 23),
+    axis.title = element_text(size = 23),
+    axis.text = element_text(size = 18),
+    plot.title = element_text(size = 23),
+    legend.text = element_text(size = 20),
+    strip.text = element_text(face = "bold")) +   # Remove minor grid lines
+  
+  ggtitle("Interaction effect between socio-economic measures and covid-19 on fast food reliance")
+
+plot2
+```
+
+```{r}
+ggsave("Fig 4.jpg", plot = plot2, width = 16, height = 18, dpi = 300, type = "cairo")
+
+```
 

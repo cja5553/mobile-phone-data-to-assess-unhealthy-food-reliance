@@ -15,7 +15,6 @@ library(data.table)
 library(sf)
 library(spdep)
 library(rgdal)
-#install.packages("naniar")
 library(naniar)
 library(stringr)
 library(dplyr)
@@ -24,6 +23,7 @@ library(bit64)
 library(stargazer)
 library(plm)
 library(sjPlot)
+library(lmtest)
 data<-read.csv("data.csv")
 
 # converting columns to their correct format
@@ -38,6 +38,7 @@ data$county<-str_pad(as.character(data$county), 5, pad = "0")
 # Calculating unhealthy food reliance 
 
 ```{r}
+
 # calcularing convenience store reliance 
 data$cs<-data$convenient_store_count/((data$convenient_store_count)+(data$grocery_count))
 
@@ -48,12 +49,12 @@ data$ff<-(data$fast_food_count / (data$fast_food_count+data$full_service_count))
 data$cv<-((data$monthly_cases)/(data$Total_Population))
 
 # taking out only relevant data columns 
-data<-subset(data,select=-c(Total_Population,date_range_start,convenient_store_count,grocery_count,fast_food_count,full_service_count,monthly_cases,Total_Population,monthly_deaths,Geo_QName))
+data<-subset(data,select=-c(Total_Population,total_population,date_range_start,convenient_store_count,grocery_count,fast_food_count,full_service_count,monthly_cases,Total_Population,monthly_deaths,Geo_QName))
 data<-data.table(data)
 data[is.na(data)] = 0
 ```
 
-# Testing for Normality
+# Check for Normality
 
 ```{r}
 
@@ -80,11 +81,11 @@ data$y_ff<-log(data$ff/(1-data$ff))
 
 # plotting the logit transformed histogram plots 
 
-hist(data$y_cs,prob=T,breaks=50,main="Histogram for logit convenience-store reliance")
+hist(data$y_cs,prob=T,breaks=50,main="Histogram for logit convenience store reliance",xlab="convenience store reliance")
 lines(density(data$y_cs),lwd = 2,col = "red",lty="longdash")
 
 
-hist(data$y_ff,prob=T,breaks=120,main="Histogram for logit fast-food reliance")
+hist(data$y_ff,prob=T,breaks=120,main="Histogram for logit fast food reliance",xlab="Fast food reliance")
 lines(density(data$y_ff),lwd = 2,col = "red",lty="longdash")
 ```
 # Testing for spatial autocorrelation. 
@@ -130,14 +131,14 @@ moran_i<-function(data,wb25,type_test){
 
 # Plotting the scatterplot to illustrate the spatial autocorrelation amongst Convenience-store reliance
 moran_i_output<-moran_i(data,wb25,"cs")
-plot(moran_i_output$p_value,moran_i_output$statistic,xlim=c(0,max(moran_i_output$p_value)),xlab="p-value",ylab="Moran's I coefficient",main="Moran's I test for spatial auto-correlation\n for convenient store dependency",cex=0.7, pch = 15)
+plot(moran_i_output$p_value,moran_i_output$statistic,xlim=c(0,max(moran_i_output$p_value)),xlab="p-value",ylab="Moran's I coefficient",main="Moran's I tests for spatial auto-correlation\n for convenience store reliance",cex=0.7, pch = 15)
 abline(v=0.05, col="red")
 text(0.038, 0, "p-value = 0.05",srt=90,col="red")
 
 
 # Plotting the scatterplot to illustrate the spatial autocorrelation amongst Fast-food reliance
 moran_i_output<-moran_i(data,wb25,"ff")
-plot(moran_i_output$p_value,moran_i_output$statistic,xlim=c(0,max(moran_i_output$p_value)),xlab="p-value",ylab="Moran's I coefficient",main="Moran's I test for spatial auto-correlation\n for fast-food dependency",cex=0.7,  pch = 15)
+plot(moran_i_output$p_value,moran_i_output$statistic,xlim=c(0,max(moran_i_output$p_value)),xlab="p-value",ylab="Moran's I coefficient",main="Moran's I tests for spatial auto-correlation\n for fast food reliance",cex=0.7,  pch = 15)
 abline(v=0.05, col="red")
 text(0.038, 0, "p-value = 0.05",srt=90,col="red")
 ```
@@ -153,7 +154,6 @@ text(0.038, 0, "p-value = 0.05",srt=90,col="red")
 test_panel_f<-function(formula,title,d=data){
   pooled<-plm(formula = formula, data = d, index = c("county","date"), model="pooling")
   fixed<- plm(formula = formula, data = d, index = c("county","date"), model = "within",effect = "time")
-  random<-plm(formula = formula, data = d, index = c("county","date"), model = "random")
   cat(title)
   (pFtest(fixed, pooled))  # if p<0.05, fixed effect is a better choice 
 
@@ -167,8 +167,14 @@ test_panel_h<-function(formula,d=data){
   (phtest(fixed,random)) # if p<0.05, fixed effect is a better choice 
 }
 
+
+```
+
+
+
+```{r}
 # creating the formula and feeding the functoin 
-fm_w <- y_cs~ + cv + percent_black + percent_hispanic + percent_native + percent_asian+ percent_black:cv + percent_hispanic:cv + percent_asian:cv + percent_native:cv
+fm_w <- y_cs~ cv + percent_black + percent_hispanic + percent_native + percent_asian+population_density+Median_household_income+Median_age+percent_some_college_education_or_more+ percent_black:cv + percent_hispanic:cv + percent_asian:cv + percent_native:cv+population_density:cv+Median_household_income:cv+Median_age:cv+percent_some_college_education_or_more:cv
 test_panel_f(fm_w,"convenience store reliance model")
 test_panel_h(fm_w)
 
@@ -181,24 +187,64 @@ test_panel_h(fm_w)
 ## Fast-food reliance test 
 
 ```{r}
-fm_w <- y_ff~ + cv + percent_black + percent_hispanic + percent_native + percent_asian+ percent_black:cv + percent_hispanic:cv + percent_asian:cv
+fm_w <- y_ff~ cv + percent_black + percent_hispanic + percent_native + percent_asian+population_density+Median_household_income+Median_age+percent_some_college_education_or_more+ percent_black:cv + percent_hispanic:cv + percent_asian:cv + percent_native:cv+population_density:cv+Median_household_income:cv+Median_age:cv+percent_some_college_education_or_more:cv
 test_panel_f(fm_w,"fast food reliance model")
 test_panel_h(fm_w)
+
 ```
 
-
-# Testing for multi-collinearity
+# Test for assumptions
 
 ```{r}
 
+
+test_panel_pcd_cd<-function(formula,d=data){
+  fixed<- plm(formula = formula, data = d, index = c("county","date"), model = "within",effect = "time")
+  (pcdtest(fixed, test = c("lm"))) # if p<0.05, fixed effect is a better choice 
+}
+test_panel_pcd_lm<-function(formula,d=data){
+  fixed<- plm(formula = formula, data = d, index = c("county","date"), model = "within",effect = "time")
+  (pcdtest(fixed, test = c("cd"))) # if p<0.05, fixed effect is a better choice 
+}
+
+test_panel_pbg<-function(formula,d=data){
+  fixed<- plm(formula = formula, data = d, index = c("county","date"), model = "within",effect = "time")
+  ( pbgtest(fixed)) # if p<0.05, use robust standard errors
+}
+
+
+```
+
+
+## Convenience store reliance
+
+```{r}
+test_panel_pcd_lm(fm_w)
+test_panel_pcd_cd(fm_w)
+test_panel_pbg(fm_w)
+
+# testing for heteroskedasticity
+bptest(y_cs~ cv + percent_black + percent_hispanic + percent_native + percent_asian+population_density+Median_household_income+Median_age+percent_some_college_education_or_more+ percent_black:cv + percent_hispanic:cv + percent_asian:cv + percent_native:cv+population_density:cv+Median_household_income:cv+Median_age:cv+percent_some_college_education_or_more:cv, data = data, studentize=F)
 # Testing multicollinearity for convenience store reliance 
 
-car::vif(lm(y_cs~ + cv + percent_black + percent_hispanic + percent_native + percent_asian, data=data))
+car::vif(lm(y_cs~ cv + percent_black + percent_hispanic + percent_native + percent_asian+population_density+Median_household_income+Median_age+percent_some_college_education_or_more, data=data))
 
+```
+
+
+## Fast food reliance
+
+```{r}
+test_panel_pcd_lm(fm_w)
+test_panel_pcd_cd(fm_w)
+test_panel_pbg(fm_w)
+# testing for heteroskedasticity
+bptest(y_ff~ cv + percent_black + percent_hispanic + percent_native + percent_asian+population_density+Median_household_income+Median_age+percent_some_college_education_or_more+ percent_black:cv + percent_hispanic:cv + percent_asian:cv + percent_native:cv+population_density:cv+Median_household_income:cv+Median_age:cv+percent_some_college_education_or_more:cv, data = data, studentize=F)
 
 # Testing multi-collinearity for fast-food reliance 
 
-car::vif(lm(y_ff~ + cv + percent_black + percent_hispanic + percent_native + percent_asian, data=data))
-
+car::vif(lm(y_ff~ cv + percent_black + percent_hispanic + percent_native + percent_asian+population_density+Median_household_income+Median_age
++percent_some_college_education_or_more, data=data))
 ```
+
 
