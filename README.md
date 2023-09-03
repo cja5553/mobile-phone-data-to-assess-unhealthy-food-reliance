@@ -2,7 +2,7 @@
 
 Author: Charles Alba and Ruopeng An
 
-To be submitted to Health Data Science Journal
+R&R in Health Data Science Journal
 
 Please Cite as: Alba, C & An, R (2023). Using mobile-phone data to assess racial disparities in unhealthy food reliance during the COVID-19 pandemic. Working Paper
 
