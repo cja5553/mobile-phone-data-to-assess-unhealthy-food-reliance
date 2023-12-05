@@ -1,10 +1,10 @@
 # Codes for paper titled "Using mobile-phone data to assess socio-economic disparities in convenience store and fast food reliance during COVID-19"
 
-Author: Charles Alba and Ruopeng An
+Authors: Charles Alba and Ruopeng An
 
-R&R in Health Data Science Journal
+ Accepted and forthcoming in Health Data Science Journal
 
-Please Cite as: Alba, C & An, R (2023). Using mobile-phone data to assess racial disparities in unhealthy food reliance during the COVID-19 pandemic. Working Paper
+Please Cite as: Alba, C & An, R (2023). Using mobile-phone data to assess racial disparities in unhealthy food reliance during the COVID-19 pandemic. Health Data Science. DOI: 10.34133/hds.0101
 
 ## Research Design 
 
